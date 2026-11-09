@@ -19,6 +19,7 @@
   --bg:#101614; --surface:#18211e; --fg:#e7eeeb; --muted:#93a39d; --line:#2a3632;
   --accent:#3fbf98; --accent-ink:#06261d; --rec:#ff6a5c; --rec-soft:#3a1d1a; color-scheme:dark}}
 *{box-sizing:border-box}
+[hidden]{display:none!important}
 html,body{margin:0}
 body{background:var(--bg);color:var(--fg);font:15px/1.55 var(--sans);
   padding-top:env(safe-area-inset-top,0px);padding-bottom:max(24px,env(safe-area-inset-bottom,0px));
@@ -58,6 +59,7 @@ button:focus-visible,input:focus-visible{outline:3px solid var(--accent);outline
 .stop{border:0;background:var(--rec);color:#fff;border-radius:12px;padding:14px;font:700 16px var(--sans);cursor:pointer;width:100%}
 .linkcard{font-size:13px;color:var(--muted);word-break:break-all}
 .linkcard a{color:var(--accent)}
+.scanned{font:12px var(--mono);color:var(--muted);word-break:break-all;margin:0}
 #list{display:flex;flex-direction:column;gap:10px;list-style:none;margin:0;padding:0}
 .item{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:12px;display:grid;
   grid-template-columns:48px minmax(0,1fr);gap:4px 12px;align-items:center}
@@ -113,7 +115,11 @@ input[type=url]{flex:1;min-width:0;border:1px solid var(--line);border-radius:10
 
   <section id="session" class="panel" hidden>
     <div id="ytWrap" hidden><div id="yt"></div></div>
-    <p class="linkcard" id="linkCard" hidden></p>
+    <p class="scanned" id="scanned" hidden></p>
+    <div class="linkcard" id="linkCard" hidden>
+      <p style="margin:0 0 8px">이 QR은 유튜브 주소가 아니라서 이 화면에서 바로 재생할 수 없어요. 유튜브 링크를 붙여 넣으면 녹음은 그대로 이어져요.</p>
+      <form id="ytForm" class="row"><input type="url" id="ytInput" placeholder="https://youtu.be/..." required><button class="ghost" style="flex:none" type="submit">재생</button></form>
+    </div>
     <div class="recbar"><span class="dot"></span><span class="time" id="clock">00:00</span><div class="meter"><i id="level"></i></div></div>
     <button class="stop" id="btnStop">녹음 끝내기</button>
   </section>
@@ -164,9 +170,9 @@ function ensureAudioCtx(){
 $("#btnScan").onclick=async()=>{
   err("");ensureAudioCtx();loadYT();
   try{
-    // 카메라와 마이크를 한 번에 요청 → 스캔 후 마이크 트랙을 그대로 녹음에 사용
-    camStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:"environment"},audio:true});
-  }catch(e){return err("카메라·마이크 권한이 필요해요. 브라우저 설정에서 허용한 뒤 다시 눌러 주세요.")}
+    // 카메라만 켠다. 아이폰에서는 카메라를 끌 때 같이 켠 마이크도 죽어서 녹음이 비는 문제가 있었음
+    camStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:"environment"}});
+  }catch(e){return err("카메라 권한이 필요해요. 설정 > Safari > 카메라에서 허용한 뒤 다시 눌러 주세요.")}
   show("scan");
   const v=$("#cam");v.srcObject=camStream;await v.play().catch(()=>{});
   if("BarcodeDetector" in window){
@@ -198,10 +204,8 @@ async function scanLoop(){
   if(text){
     scanning=false;
     if(navigator.vibrate)navigator.vibrate(60);
-    const audioTracks=camStream.getAudioTracks();
-    camStream.getVideoTracks().forEach(t=>t.stop());
-    micStream=new MediaStream(audioTracks);camStream=null;
-    begin(text.trim());
+    stopTracks(camStream);camStream=null;
+    if(await getMic()) begin(text.trim()); else show("home");
     return;
   }
   setTimeout(scanLoop,150);
@@ -214,21 +218,28 @@ function stopTracks(s){if(s)s.getTracks().forEach(t=>t.stop())}
 $("#btnLink").onclick=()=>{$("#linkForm").hidden=!$("#linkForm").hidden;if(!$("#linkForm").hidden)$("#linkInput").focus()};
 $("#linkForm").onsubmit=async e=>{e.preventDefault();ensureAudioCtx();loadYT();if(await getMic())begin($("#linkInput").value.trim())};
 $("#btnMicOnly").onclick=async()=>{ensureAudioCtx();if(await getMic())begin(null)};
+$("#ytForm").onsubmit=e=>{e.preventDefault();const y=ytParse($("#ytInput").value.trim());
+  if(!y){alertInline("유튜브 주소를 찾지 못했어요. youtu.be 또는 youtube.com 주소를 넣어 주세요.");return}
+  if(pendingShort)memoSet(pendingShort,y);
+  $("#linkCard").hidden=true;playVideo(y)};
+function alertInline(m){const p=$("#linkCard p");p.textContent=m}
 async function getMic(){
   err("");
-  try{micStream=await navigator.mediaDevices.getUserMedia({audio:true});return true}
-  catch(e){err("마이크 권한이 필요해요. 브라우저 설정에서 허용한 뒤 다시 눌러 주세요.");return false}
+  try{micStream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true}});return true}
+  catch(e){err("마이크 권한이 필요해요. 설정 > Safari > 마이크에서 허용한 뒤 다시 눌러 주세요.");return false}
 }
 
 /* ---------- 유튜브 ---------- */
-function ytId(url){
+function ytParse(url){
   if(!url)return null;
   try{
-    const u=new URL(url);const h=u.hostname.replace(/^www\.|^m\./,"");
-    if(h==="youtu.be")return u.pathname.slice(1).split("/")[0]||null;
-    if(h.endsWith("youtube.com")){
-      if(u.searchParams.get("v"))return u.searchParams.get("v");
-      const m=u.pathname.match(/\/(shorts|embed|live|v)\/([\w-]{6,})/);if(m)return m[2];
+    const u=new URL(url);const h=u.hostname.replace(/^(www|m|music)\./,"");
+    const list=u.searchParams.get("list");
+    if(h==="youtu.be"){const v=u.pathname.slice(1).split("/")[0];return v?{v,list}:null}
+    if(h.endsWith("youtube.com")||h.endsWith("youtube-nocookie.com")){
+      const v=u.searchParams.get("v");if(v)return {v,list};
+      const m=u.pathname.match(/\/(shorts|embed|live|v)\/([\w-]{6,})/);if(m)return {v:m[2],list};
+      if(list)return {v:null,list};
     }
   }catch(e){}
   return null;
@@ -242,42 +253,77 @@ function loadYT(){
   });
   return ytApiPromise;
 }
-async function playVideo(id){
-  $("#ytWrap").hidden=false;curVideoId=id;
+async function playVideo(y){
+  $("#ytWrap").hidden=false;curVideoId=y.v||y.list;
   await loadYT();
-  if(yt&&yt.loadVideoById){yt.loadVideoById(id);return}
-  yt=new YT.Player("yt",{videoId:id,playerVars:{autoplay:1,playsinline:1,rel:0,modestbranding:1},
-    events:{onReady:e=>e.target.playVideo(),
-      onStateChange:e=>{if(e.data===YT.PlayerState.ENDED&&$("#autoStop").checked&&recorder)setTimeout(stopRec,1500)}}});
+  if(yt&&yt.destroy){try{yt.destroy()}catch(e){} $("#ytWrap").innerHTML='<div id="yt"></div>'}
+  const vars={autoplay:1,playsinline:1,rel:0};
+  if(y.list){vars.listType="playlist";vars.list=y.list}
+  yt=new YT.Player("yt",{videoId:y.v||undefined,playerVars:vars,
+    events:{onReady:e=>{try{e.target.playVideo()}catch(_){}},
+      onStateChange:e=>{if(e.data===YT.PlayerState.ENDED&&$("#autoStop").checked&&recorder&&!y.list)setTimeout(stopRec,1500)}}});
 }
 
 /* ---------- 녹음 ---------- */
 function pickMime(){
-  for(const m of ["audio/webm;codecs=opus","audio/mp4","audio/webm","audio/ogg"])
+  // 아이폰은 mp4(m4a)가 가장 안정적이고, 최신 안드로이드 크롬도 지원
+  for(const m of ["audio/mp4","audio/webm;codecs=opus","audio/webm","audio/ogg"])
     if(window.MediaRecorder&&MediaRecorder.isTypeSupported&&MediaRecorder.isTypeSupported(m))return m;
   return "";
 }
 function begin(url){
   show("session");$("#linkForm").hidden=true;
-  const id=ytId(url);
-  $("#ytWrap").hidden=true;$("#linkCard").hidden=true;curVideoId=null;
-  if(id)playVideo(id);
-  else if(url){
-    const c=$("#linkCard");c.hidden=false;c.textContent="";
-    c.append("유튜브 링크가 아니라서 여기서 재생할 수 없어요. ");
-    const a=document.createElement("a");a.href=url;a.target="_blank";a.rel="noopener";a.textContent="링크 열기";c.append(a);
-    c.append(" (다른 앱으로 넘어가면 녹음이 멈출 수 있어요)");
-  }
+  const y=ytParse(url);
+  $("#ytWrap").hidden=true;$("#linkCard").hidden=true;curVideoId=null;pendingShort=null;
+  const sc=$("#scanned");sc.hidden=!url;sc.textContent=url?("QR 주소: "+url):"";
   startRec();
+  if(y)playVideo(y);
+  else if(url)resolveAndPlay(url);
 }
+/* 책 QR은 네이버 단축주소(m.site.naver.com) → 유튜브로 넘어가는 구조.
+   브라우저는 다른 사이트의 리다이렉트를 직접 읽을 수 없어서 중계 서버로 최종 주소를 알아낸다.
+   한 번 알아낸 주소는 폰에 기억해 두고 다음부터는 바로 재생한다. */
+let pendingShort=null;
+function memoGet(k){try{return JSON.parse(localGet("ytmap")||"{}")[k]}catch(e){return null}}
+function memoSet(k,v){try{const m=JSON.parse(localGet("ytmap")||"{}");m[k]=v;localSet("ytmap",JSON.stringify(m))}catch(e){}}
+function findYT(text){
+  if(!text)return null;
+  const m=text.match(/https?:\/\/(?:www\.|m\.)?(?:youtube\.com\/(?:watch\?[^"'\s<>]*v=|shorts\/|embed\/|live\/|playlist\?[^"'\s<>]*list=)[\w-]+[^"'\s<>]*|youtu\.be\/[\w-]+[^"'\s<>]*)/);
+  return m?ytParse(m[0].replace(/&amp;/g,"&").replace(/\\u0026/g,"&")):null;
+}
+async function withTimeout(p,ms){return Promise.race([p,new Promise((_,r)=>setTimeout(()=>r(new Error("timeout")),ms))])}
+async function resolveShort(url){
+  const tries=[
+    async()=>{const r=await fetch("https://api.allorigins.win/get?url="+encodeURIComponent(url));const j=await r.json();
+      return ytParse(j.status&&j.status.url)||findYT(j.contents)},
+    async()=>{const r=await fetch("https://corsproxy.io/?url="+encodeURIComponent(url));return findYT(await r.text())},
+    async()=>{const r=await fetch("https://api.codetabs.com/v1/proxy/?quest="+encodeURIComponent(url));return findYT(await r.text())}
+  ];
+  for(const t of tries){try{const y=await withTimeout(t(),7000);if(y)return y}catch(e){}}
+  return null;
+}
+async function resolveAndPlay(url){
+  const known=memoGet(url);
+  if(known){playVideo(known);return}
+  pendingShort=url;
+  const c=$("#linkCard");c.hidden=false;$("#ytInput").value="";
+  $("#linkCard p").textContent="QR 주소에서 유튜브 영상을 찾는 중이에요… 녹음은 이미 시작됐어요.";
+  const y=await resolveShort(url);
+  if(pendingShort!==url)return;
+  if(y){memoSet(url,y);c.hidden=true;playVideo(y)}
+  else $("#linkCard p").textContent="영상 주소를 자동으로 찾지 못했어요. 유튜브 링크를 붙여 넣으면 바로 재생되고, 다음부터 이 QR은 자동으로 재생돼요.";
+}
+let lostByBackground=false;
 function startRec(){
   const mime=pickMime();
   try{recorder=new MediaRecorder(micStream,mime?{mimeType:mime}:undefined)}
-  catch(e){err("이 브라우저는 녹음을 지원하지 않아요. Chrome이나 Safari 최신 버전을 써 주세요.");show("home");return}
-  chunks=[];recorder.ondataavailable=e=>{if(e.data.size)chunks.push(e.data)};
-  recorder.onstop=saveRec;recorder.start(1000);t0=Date.now();
+  catch(e){err("이 브라우저는 녹음을 지원하지 않아요. Safari나 Chrome 최신 버전을 써 주세요.");stopTracks(micStream);show("home");return}
+  chunks=[];lostByBackground=false;
+  recorder.ondataavailable=e=>{if(e.data&&e.data.size)chunks.push(e.data)};
+  recorder.onstop=finishRec;
+  micStream.getAudioTracks().forEach(t=>t.onended=()=>{lostByBackground=document.hidden;stopRec()});
+  recorder.start(1000);t0=Date.now();
   clockTimer=setInterval(()=>{$("#clock").textContent=fmt((Date.now()-t0)/1000)},250);
-  // 입력 레벨 표시
   try{
     ensureAudioCtx();
     analyser=audioCtx.createAnalyser();analyser.fftSize=512;
@@ -287,20 +333,34 @@ function startRec(){
       $("#level").style.width=Math.min(100,m/90*100)+"%";rafLevel=requestAnimationFrame(tick)};tick();
   }catch(e){}
 }
+document.addEventListener("visibilitychange",()=>{if(document.hidden&&recorder)lostByBackground=true});
 $("#btnStop").onclick=()=>stopRec();
+let stopping=false;
 function stopRec(){
-  if(!recorder||recorder.state==="inactive")return;
-  recorder.stop();
+  if(stopping)return;stopping=true;
   clearInterval(clockTimer);cancelAnimationFrame(rafLevel);$("#level").style.width="0";
   try{yt&&yt.pauseVideo&&yt.pauseVideo()}catch(e){}
+  if(recorder&&recorder.state!=="inactive"){
+    try{recorder.requestData()}catch(e){}
+    try{recorder.stop()}catch(e){finishRec()}
+    // onstop이 안 오는 경우를 대비한 안전장치
+    setTimeout(()=>{if(stopping)finishRec()},2500);
+  } else finishRec();
 }
-async function saveRec(){
-  const type=recorder.mimeType||chunks[0]?.type||"audio/webm";
-  const blob=new Blob(chunks,{type});
+async function finishRec(){
+  if(!stopping&&recorder&&recorder.state!=="inactive")return;
+  const r=recorder;recorder=null;stopping=false;
+  if(!r){show("home");return}
+  const dur=(Date.now()-t0)/1000;
+  const type=(r.mimeType||chunks[0]?.type||"audio/mp4").split(";")[0];
+  const blob=new Blob(chunks,{type});chunks=[];
   let title="";try{title=(yt&&curVideoId&&yt.getVideoData())?.title||""}catch(e){}
-  const rec={id:Date.now(),part,title:title||(curVideoId?"QR 문제":"자유 녹음"),created:t0,dur:(Date.now()-t0)/1000,type,blob};
-  stopTracks(micStream);micStream=null;recorder=null;
-  await dbPut(rec);show("home");renderList();
+  stopTracks(micStream);micStream=null;
+  show("home");$("#clock").textContent="00:00";
+  if(!blob.size){err(lostByBackground?"다른 앱으로 넘어가서 녹음이 끊겼어요. 이 화면을 켜 둔 채로 답변해 주세요.":"녹음된 소리가 없어요. 마이크 권한을 확인해 주세요.");return}
+  if(lostByBackground)err("중간에 다른 앱으로 넘어가서 그 뒤 녹음은 빠졌을 수 있어요.");
+  await dbPut({id:Date.now(),part,title:title||(curVideoId?"QR 문제":"자유 녹음"),created:t0,dur,type,blob});
+  renderList();
 }
 
 /* ---------- 저장 (IndexedDB) ---------- */
