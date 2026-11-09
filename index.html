@@ -1,0 +1,361 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>스피킹 녹음기</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;700&family=IBM+Plex+Mono:wght@500&display=swap">
+<style>
+/* 한 손 조작용 단일 컬럼: 위에서 아래로 파트 선택 → 시작 → 진행 → 녹음 목록 */
+:root{
+  --bg:#f3f5f4; --surface:#ffffff; --fg:#17201d; --muted:#5d6b66; --line:#dbe2df;
+  --accent:#0f7b62; --accent-ink:#ffffff; --rec:#d23b2f; --rec-soft:#fbe7e5;
+  --sans:"IBM Plex Sans KR",-apple-system,"Apple SD Gothic Neo","Malgun Gothic",sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,Menlo,monospace;
+  color-scheme:light;
+}
+@media (prefers-color-scheme:dark){:root{
+  --bg:#101614; --surface:#18211e; --fg:#e7eeeb; --muted:#93a39d; --line:#2a3632;
+  --accent:#3fbf98; --accent-ink:#06261d; --rec:#ff6a5c; --rec-soft:#3a1d1a; color-scheme:dark}}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--fg);font:15px/1.55 var(--sans);
+  padding-top:env(safe-area-inset-top,0px);padding-bottom:max(24px,env(safe-area-inset-bottom,0px));
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+main{max-width:560px;margin:0 auto;display:flex;flex-direction:column;gap:18px;padding-block:18px}
+h1{font-size:22px;margin:0;letter-spacing:-.01em}
+.sub{color:var(--muted);margin:2px 0 0;font-size:13px}
+.label{font-size:12px;font-weight:700;letter-spacing:.06em;color:var(--muted);margin:0 0 8px}
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.chip{border:1px solid var(--line);background:var(--surface);color:var(--fg);border-radius:999px;
+  padding:7px 13px;font:500 14px var(--sans);cursor:pointer}
+.chip small{color:var(--muted);font-weight:400;margin-left:4px}
+.chip[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.chip[aria-pressed="true"] small{color:inherit;opacity:.8}
+button{font-family:var(--sans)}
+button:focus-visible,input:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+.primary{width:100%;border:0;border-radius:16px;background:var(--accent);color:var(--accent-ink);
+  font:700 18px var(--sans);padding:18px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:10px}
+.row{display:flex;gap:8px}
+.ghost{flex:1;border:1px solid var(--line);background:var(--surface);color:var(--fg);border-radius:12px;
+  padding:12px;font:500 14px var(--sans);cursor:pointer}
+.opt{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted)}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:14px;display:flex;flex-direction:column;gap:12px}
+#scanBox{position:relative;border-radius:14px;overflow:hidden;background:#000;aspect-ratio:3/4;max-width:100%}
+#cam{width:100%;height:100%;object-fit:cover;display:block}
+#scanBox .frame{position:absolute;inset:18%;border:3px solid #fff;border-radius:18px;box-shadow:0 0 0 999px rgba(0,0,0,.35)}
+#scanBox .hint{position:absolute;left:0;right:0;bottom:12px;text-align:center;color:#fff;font-size:14px}
+#ytWrap{position:relative;aspect-ratio:16/9;max-width:100%;border-radius:12px;overflow:hidden;background:#000}
+#ytWrap > *{position:absolute;inset:0;width:100%;height:100%}
+.recbar{display:flex;align-items:center;gap:12px;background:var(--rec-soft);border-radius:12px;padding:12px}
+.dot{width:12px;height:12px;border-radius:50%;background:var(--rec);flex:none;animation:pulse 1.2s infinite}
+@keyframes pulse{50%{opacity:.3}}
+@media (prefers-reduced-motion:reduce){.dot{animation:none}}
+.time{font:500 20px var(--mono);font-variant-numeric:tabular-nums;color:var(--rec)}
+.meter{flex:1;height:8px;border-radius:4px;background:var(--line);overflow:hidden}
+.meter i{display:block;height:100%;width:0;background:var(--rec);transition:width .08s}
+.stop{border:0;background:var(--rec);color:#fff;border-radius:12px;padding:14px;font:700 16px var(--sans);cursor:pointer;width:100%}
+.linkcard{font-size:13px;color:var(--muted);word-break:break-all}
+.linkcard a{color:var(--accent)}
+#list{display:flex;flex-direction:column;gap:10px;list-style:none;margin:0;padding:0}
+.item{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:12px;display:grid;
+  grid-template-columns:48px minmax(0,1fr);gap:4px 12px;align-items:center}
+.play{grid-row:span 2;width:48px;height:48px;border-radius:50%;border:0;background:var(--accent);color:var(--accent-ink);
+  cursor:pointer;display:grid;place-items:center}
+.meta{min-width:0}
+.meta b{font-size:14px;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.meta span{font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
+.tag{display:inline-block;font:500 11px var(--mono);border:1px solid var(--line);border-radius:6px;padding:0 6px;margin-right:6px;color:var(--fg)}
+.ctrl{display:flex;align-items:center;gap:8px;min-width:0}
+.ctrl input[type=range]{flex:1;min-width:0;accent-color:var(--accent)}
+.ctrl .t{font:500 12px var(--mono);color:var(--muted);font-variant-numeric:tabular-nums}
+.icon{border:0;background:none;color:var(--muted);cursor:pointer;padding:4px;font:500 12px var(--sans)}
+.icon.del{color:var(--rec)}
+.empty{color:var(--muted);font-size:14px;text-align:center;padding:20px;border:1px dashed var(--line);border-radius:14px}
+.err{color:var(--rec);font-size:13px}
+input[type=url]{flex:1;min-width:0;border:1px solid var(--line);border-radius:10px;padding:10px;background:var(--bg);color:var(--fg);font:14px var(--sans)}
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>스피킹 녹음기</h1>
+    <p class="sub">QR을 찍으면 문제 영상이 나오고 바로 녹음이 시작돼요. 이어폰을 끼면 내 목소리만 깨끗하게 녹음돼요.</p>
+  </header>
+
+  <section>
+    <p class="label">파트</p>
+    <div class="chips" id="parts"></div>
+  </section>
+
+  <section id="home" class="panel" style="background:none;border:0;padding:0">
+    <button class="primary" id="btnScan">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3"/><rect x="8" y="8" width="8" height="8" rx="1"/></svg>
+      QR 찍고 녹음 시작
+    </button>
+    <div class="row">
+      <button class="ghost" id="btnLink">링크 붙여넣기</button>
+      <button class="ghost" id="btnMicOnly">녹음만 하기</button>
+    </div>
+    <form id="linkForm" class="row" hidden>
+      <input type="url" id="linkInput" placeholder="https://youtu.be/..." required>
+      <button class="ghost" style="flex:none" type="submit">시작</button>
+    </form>
+    <label class="opt"><input type="checkbox" id="autoStop" checked> 영상이 끝나면 녹음 자동 종료</label>
+    <p class="err" id="err" hidden></p>
+  </section>
+
+  <section id="scan" class="panel" hidden>
+    <div id="scanBox"><video id="cam" playsinline muted></video><div class="frame"></div><div class="hint">QR코드를 네모 안에 맞춰 주세요</div></div>
+    <button class="ghost" id="btnCancel">취소</button>
+  </section>
+
+  <section id="session" class="panel" hidden>
+    <div id="ytWrap" hidden><div id="yt"></div></div>
+    <p class="linkcard" id="linkCard" hidden></p>
+    <div class="recbar"><span class="dot"></span><span class="time" id="clock">00:00</span><div class="meter"><i id="level"></i></div></div>
+    <button class="stop" id="btnStop">녹음 끝내기</button>
+  </section>
+
+  <section>
+    <p class="label">내 녹음</p>
+    <ul id="list"></ul>
+  </section>
+</main>
+
+<audio id="player" preload="metadata"></audio>
+
+<script>
+const PARTS=[["P1","Part 1","읽기"],["P2","Part 2","사진 묘사"],["P3","Part 3","질문 응답"],["P4","Part 4","정보 활용"],["P5","Part 5","의견 제시"],["MOCK","실전 모의고사",""]];
+const $=s=>document.querySelector(s);
+let part=localGet("part")||"P1";
+let camStream=null, micStream=null, recorder=null, chunks=[], t0=0, clockTimer=null;
+let audioCtx=null, analyser=null, rafLevel=0, scanning=false, detector=null;
+let yt=null, ytApiPromise=null, curVideoId=null;
+
+function localGet(k){try{return localStorage.getItem(k)}catch(e){return null}}
+function localSet(k,v){try{localStorage.setItem(k,v)}catch(e){}}
+
+/* ---------- 파트 선택 ---------- */
+function renderParts(){
+  $("#parts").innerHTML="";
+  for(const [id,name,desc] of PARTS){
+    const b=document.createElement("button");
+    b.className="chip";b.type="button";b.setAttribute("aria-pressed",String(id===part));
+    b.innerHTML=name+(desc?`<small>${desc}</small>`:"");
+    b.onclick=()=>{part=id;localSet("part",id);renderParts()};
+    $("#parts").appendChild(b);
+  }
+}
+renderParts();
+
+function show(id){for(const s of ["home","scan","session"]) $("#"+s).hidden=(s!==id)}
+function err(msg){const e=$("#err");e.textContent=msg;e.hidden=!msg}
+
+function ensureAudioCtx(){
+  try{
+    if(!audioCtx) audioCtx=new (window.AudioContext||window.webkitAudioContext)();
+    if(audioCtx.state==="suspended") audioCtx.resume();
+  }catch(e){}
+}
+
+/* ---------- QR 스캔 ---------- */
+$("#btnScan").onclick=async()=>{
+  err("");ensureAudioCtx();loadYT();
+  try{
+    // 카메라와 마이크를 한 번에 요청 → 스캔 후 마이크 트랙을 그대로 녹음에 사용
+    camStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:"environment"},audio:true});
+  }catch(e){return err("카메라·마이크 권한이 필요해요. 브라우저 설정에서 허용한 뒤 다시 눌러 주세요.")}
+  show("scan");
+  const v=$("#cam");v.srcObject=camStream;await v.play().catch(()=>{});
+  if("BarcodeDetector" in window){
+    try{const f=await BarcodeDetector.getSupportedFormats();if(f.includes("qr_code"))detector=new BarcodeDetector({formats:["qr_code"]})}catch(e){}
+  }
+  if(!detector && !window.jsQR){
+    await new Promise((res,rej)=>{const s=document.createElement("script");s.src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js";s.onload=res;s.onerror=rej;document.head.appendChild(s)}).catch(()=>{});
+  }
+  scanning=true;scanLoop();
+};
+
+const scanCanvas=document.createElement("canvas");
+const scanCtx=scanCanvas.getContext("2d",{willReadFrequently:true});
+async function scanLoop(){
+  if(!scanning)return;
+  const v=$("#cam");let text=null;
+  if(v.readyState>=2){
+    try{
+      if(detector){const c=await detector.detect(v);if(c.length)text=c[0].rawValue}
+      else if(window.jsQR){
+        const w=v.videoWidth,h=v.videoHeight,scale=Math.min(1,640/Math.max(w,h));
+        scanCanvas.width=w*scale;scanCanvas.height=h*scale;
+        scanCtx.drawImage(v,0,0,scanCanvas.width,scanCanvas.height);
+        const d=scanCtx.getImageData(0,0,scanCanvas.width,scanCanvas.height);
+        const r=jsQR(d.data,d.width,d.height,{inversionAttempts:"dontInvert"});if(r)text=r.data;
+      }
+    }catch(e){}
+  }
+  if(text){
+    scanning=false;
+    if(navigator.vibrate)navigator.vibrate(60);
+    const audioTracks=camStream.getAudioTracks();
+    camStream.getVideoTracks().forEach(t=>t.stop());
+    micStream=new MediaStream(audioTracks);camStream=null;
+    begin(text.trim());
+    return;
+  }
+  setTimeout(scanLoop,150);
+}
+
+$("#btnCancel").onclick=()=>{scanning=false;stopTracks(camStream);camStream=null;show("home")};
+function stopTracks(s){if(s)s.getTracks().forEach(t=>t.stop())}
+
+/* ---------- 링크 / 녹음만 ---------- */
+$("#btnLink").onclick=()=>{$("#linkForm").hidden=!$("#linkForm").hidden;if(!$("#linkForm").hidden)$("#linkInput").focus()};
+$("#linkForm").onsubmit=async e=>{e.preventDefault();ensureAudioCtx();loadYT();if(await getMic())begin($("#linkInput").value.trim())};
+$("#btnMicOnly").onclick=async()=>{ensureAudioCtx();if(await getMic())begin(null)};
+async function getMic(){
+  err("");
+  try{micStream=await navigator.mediaDevices.getUserMedia({audio:true});return true}
+  catch(e){err("마이크 권한이 필요해요. 브라우저 설정에서 허용한 뒤 다시 눌러 주세요.");return false}
+}
+
+/* ---------- 유튜브 ---------- */
+function ytId(url){
+  if(!url)return null;
+  try{
+    const u=new URL(url);const h=u.hostname.replace(/^www\.|^m\./,"");
+    if(h==="youtu.be")return u.pathname.slice(1).split("/")[0]||null;
+    if(h.endsWith("youtube.com")){
+      if(u.searchParams.get("v"))return u.searchParams.get("v");
+      const m=u.pathname.match(/\/(shorts|embed|live|v)\/([\w-]{6,})/);if(m)return m[2];
+    }
+  }catch(e){}
+  return null;
+}
+function loadYT(){
+  if(ytApiPromise)return ytApiPromise;
+  ytApiPromise=new Promise(res=>{
+    if(window.YT&&YT.Player)return res();
+    window.onYouTubeIframeAPIReady=res;
+    const s=document.createElement("script");s.src="https://www.youtube.com/iframe_api";document.head.appendChild(s);
+  });
+  return ytApiPromise;
+}
+async function playVideo(id){
+  $("#ytWrap").hidden=false;curVideoId=id;
+  await loadYT();
+  if(yt&&yt.loadVideoById){yt.loadVideoById(id);return}
+  yt=new YT.Player("yt",{videoId:id,playerVars:{autoplay:1,playsinline:1,rel:0,modestbranding:1},
+    events:{onReady:e=>e.target.playVideo(),
+      onStateChange:e=>{if(e.data===YT.PlayerState.ENDED&&$("#autoStop").checked&&recorder)setTimeout(stopRec,1500)}}});
+}
+
+/* ---------- 녹음 ---------- */
+function pickMime(){
+  for(const m of ["audio/webm;codecs=opus","audio/mp4","audio/webm","audio/ogg"])
+    if(window.MediaRecorder&&MediaRecorder.isTypeSupported&&MediaRecorder.isTypeSupported(m))return m;
+  return "";
+}
+function begin(url){
+  show("session");$("#linkForm").hidden=true;
+  const id=ytId(url);
+  $("#ytWrap").hidden=true;$("#linkCard").hidden=true;curVideoId=null;
+  if(id)playVideo(id);
+  else if(url){
+    const c=$("#linkCard");c.hidden=false;c.textContent="";
+    c.append("유튜브 링크가 아니라서 여기서 재생할 수 없어요. ");
+    const a=document.createElement("a");a.href=url;a.target="_blank";a.rel="noopener";a.textContent="링크 열기";c.append(a);
+    c.append(" (다른 앱으로 넘어가면 녹음이 멈출 수 있어요)");
+  }
+  startRec();
+}
+function startRec(){
+  const mime=pickMime();
+  try{recorder=new MediaRecorder(micStream,mime?{mimeType:mime}:undefined)}
+  catch(e){err("이 브라우저는 녹음을 지원하지 않아요. Chrome이나 Safari 최신 버전을 써 주세요.");show("home");return}
+  chunks=[];recorder.ondataavailable=e=>{if(e.data.size)chunks.push(e.data)};
+  recorder.onstop=saveRec;recorder.start(1000);t0=Date.now();
+  clockTimer=setInterval(()=>{$("#clock").textContent=fmt((Date.now()-t0)/1000)},250);
+  // 입력 레벨 표시
+  try{
+    ensureAudioCtx();
+    analyser=audioCtx.createAnalyser();analyser.fftSize=512;
+    audioCtx.createMediaStreamSource(micStream).connect(analyser);
+    const buf=new Uint8Array(analyser.fftSize);
+    const tick=()=>{analyser.getByteTimeDomainData(buf);let m=0;for(const x of buf)m=Math.max(m,Math.abs(x-128));
+      $("#level").style.width=Math.min(100,m/90*100)+"%";rafLevel=requestAnimationFrame(tick)};tick();
+  }catch(e){}
+}
+$("#btnStop").onclick=()=>stopRec();
+function stopRec(){
+  if(!recorder||recorder.state==="inactive")return;
+  recorder.stop();
+  clearInterval(clockTimer);cancelAnimationFrame(rafLevel);$("#level").style.width="0";
+  try{yt&&yt.pauseVideo&&yt.pauseVideo()}catch(e){}
+}
+async function saveRec(){
+  const type=recorder.mimeType||chunks[0]?.type||"audio/webm";
+  const blob=new Blob(chunks,{type});
+  let title="";try{title=(yt&&curVideoId&&yt.getVideoData())?.title||""}catch(e){}
+  const rec={id:Date.now(),part,title:title||(curVideoId?"QR 문제":"자유 녹음"),created:t0,dur:(Date.now()-t0)/1000,type,blob};
+  stopTracks(micStream);micStream=null;recorder=null;
+  await dbPut(rec);show("home");renderList();
+}
+
+/* ---------- 저장 (IndexedDB) ---------- */
+function db(){return new Promise((res,rej)=>{const r=indexedDB.open("speaking-rec",1);
+  r.onupgradeneeded=()=>r.result.createObjectStore("recs",{keyPath:"id"});r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)})}
+async function tx(mode,fn){const d=await db();return new Promise((res,rej)=>{const t=d.transaction("recs",mode);const out=fn(t.objectStore("recs"));
+  t.oncomplete=()=>res(out&&out.result);t.onerror=()=>rej(t.error)})}
+const dbPut=r=>tx("readwrite",s=>s.put(r));
+const dbDel=id=>tx("readwrite",s=>s.delete(id));
+const dbAll=()=>tx("readonly",s=>s.getAll());
+
+/* ---------- 목록 / 재생 ---------- */
+const audio=$("#player");let playingId=null,url=null;
+function fmt(s){s=Math.max(0,Math.floor(s||0));return String(Math.floor(s/60)).padStart(2,"0")+":"+String(s%60).padStart(2,"0")}
+const ICON_PLAY='<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 4.5v15l13-7.5z"/></svg>';
+const ICON_PAUSE='<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M6 4h4v16H6zM14 4h4v16h-4z"/></svg>';
+const partName=id=>(PARTS.find(p=>p[0]===id)||[,id])[1];
+
+async function renderList(){
+  let recs=[];try{recs=(await dbAll()).sort((a,b)=>b.id-a.id)}catch(e){}
+  const ul=$("#list");ul.innerHTML="";
+  if(!recs.length){ul.innerHTML='<li class="empty">아직 녹음이 없어요. 위에서 QR을 찍어 첫 답변을 녹음해 보세요.</li>';return}
+  for(const r of recs){
+    const d=new Date(r.created);
+    const li=document.createElement("li");li.className="item";li.dataset.id=r.id;
+    li.innerHTML=`<button class="play" aria-label="재생">${ICON_PLAY}</button>
+      <div class="meta"><b></b><span><span class="tag">${partName(r.part)}</span>${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")} · ${fmt(r.dur)}</span></div>
+      <div class="ctrl"><input type="range" min="0" max="${Math.max(1,r.dur)}" step="0.1" value="0" aria-label="재생 위치"><span class="t">00:00</span>
+      <button class="icon save">저장</button><button class="icon del">삭제</button></div>`;
+    li.querySelector("b").textContent=r.title;
+    li.querySelector(".play").onclick=()=>toggle(r,li);
+    li.querySelector("input").oninput=e=>{if(playingId===r.id)audio.currentTime=+e.target.value};
+    li.querySelector(".save").onclick=()=>{const a=document.createElement("a");a.href=URL.createObjectURL(r.blob);
+      a.download=`TOEIC_${r.part}_${d.toISOString().slice(0,16).replace(/[-:T]/g,"")}.${r.type.includes("mp4")?"m4a":r.type.includes("ogg")?"ogg":"webm"}`;a.click()};
+    const del=li.querySelector(".del");
+    del.onclick=async()=>{
+      if(del.dataset.armed){if(playingId===r.id){audio.pause();playingId=null}await dbDel(r.id);renderList()}
+      else{del.dataset.armed=1;del.textContent="정말 삭제?";setTimeout(()=>{delete del.dataset.armed;del.textContent="삭제"},3000)}
+    };
+    ul.appendChild(li);
+  }
+}
+function toggle(r,li){
+  if(playingId===r.id){audio.paused?audio.play():audio.pause();return}
+  audio.pause();document.querySelectorAll(".play").forEach(b=>b.innerHTML=ICON_PLAY);
+  if(url)URL.revokeObjectURL(url);url=URL.createObjectURL(r.blob);
+  audio.src=url;playingId=r.id;audio.play();
+}
+const cur=()=>playingId&&document.querySelector(`.item[data-id="${playingId}"]`);
+audio.onplay=()=>{const li=cur();if(li)li.querySelector(".play").innerHTML=ICON_PAUSE};
+audio.onpause=()=>{const li=cur();if(li)li.querySelector(".play").innerHTML=ICON_PLAY};
+audio.ontimeupdate=()=>{const li=cur();if(!li)return;li.querySelector("input").value=audio.currentTime;li.querySelector(".t").textContent=fmt(audio.currentTime)};
+audio.onended=()=>{const li=cur();if(li){li.querySelector("input").value=0;li.querySelector(".t").textContent="00:00"}};
+
+renderList();
+</script>
+</body>
+</html>
